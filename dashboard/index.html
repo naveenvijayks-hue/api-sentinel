@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>API Sentinel — Live Console</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  :root{
+    --ink:#0F1417;
+    --panel:#151B20;
+    --panel-2:#12171B;
+    --line:#28323A;
+    --text:#E7EDF1;
+    --muted:#7F8D96;
+    --safe:#4CB783;
+    --warn:#E0A83E;
+    --block:#E0564D;
+    --identity:#5B8DEF;
+    --resource:#B98CE0;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  @media (prefers-reduced-motion: reduce){ *{ animation-duration: .001ms !important; transition-duration: .001ms !important; } }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; background:var(--ink); color:var(--text); font-family:var(--sans); }
+
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 20px; border-bottom:1px solid var(--line); background:var(--panel-2);
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand h1{ font-size:16px; font-weight:600; letter-spacing:.2px; margin:0; }
+  .pulse{ width:8px; height:8px; border-radius:50%; background:var(--safe); box-shadow:0 0 0 0 rgba(76,183,131,.6); animation:pulse 2s infinite; }
+  @keyframes pulse{
+    0%{ box-shadow:0 0 0 0 rgba(76,183,131,.5); }
+    70%{ box-shadow:0 0 0 8px rgba(76,183,131,0); }
+    100%{ box-shadow:0 0 0 0 rgba(76,183,131,0); }
+  }
+  .stats{ display:flex; gap:26px; font-family:var(--mono); font-size:13px; color:var(--muted); }
+  .stats b{ color:var(--text); font-weight:600; }
+
+  .layout{ display:grid; grid-template-columns: 1fr 380px; grid-template-rows: 1fr auto; height: calc(100vh - 53px); }
+
+  .graph-panel{ position:relative; border-right:1px solid var(--line); overflow:hidden; grid-row: 1 / 2; }
+  .graph-panel .caption{ position:absolute; top:14px; left:16px; font-size:12px; color:var(--muted); letter-spacing:.3px; z-index:2; }
+  .legend{ position:absolute; bottom:14px; left:16px; display:flex; gap:16px; font-size:11px; color:var(--muted); z-index:2; }
+  .legend span{ display:flex; align-items:center; gap:6px; }
+  .dot{ width:9px; height:9px; border-radius:50%; display:inline-block; }
+
+  .feed{ grid-row: 1 / 2; display:flex; flex-direction:column; border-bottom:1px solid var(--line); overflow:hidden; }
+  .feed-head{ padding:14px 16px 10px; border-bottom:1px solid var(--line); }
+  .feed-head h2{ font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:0 0 2px; font-weight:600; }
+  .feed-head p{ margin:0; font-size:12px; color:var(--muted); }
+  .feed-list{ overflow-y:auto; flex:1; padding:8px; }
+  .alert{ border:1px solid var(--line); border-radius:6px; padding:10px 12px; margin-bottom:8px; background:var(--panel); }
+  .alert .row1{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+  .alert .who{ font-family:var(--mono); font-size:12.5px; color:var(--text); }
+  .badge{ font-size:10.5px; padding:2px 7px; border-radius:3px; font-weight:600; letter-spacing:.3px; text-transform:uppercase; }
+  .badge.block{ background:rgba(224,86,77,.15); color:var(--block); }
+  .badge.throttle{ background:rgba(224,168,62,.15); color:var(--warn); }
+  .badge.allow{ background:rgba(76,183,131,.15); color:var(--safe); }
+  .score-bar{ height:4px; border-radius:2px; background:var(--line); margin-bottom:8px; overflow:hidden; }
+  .score-bar i{ display:block; height:100%; }
+  .reasons{ font-size:12px; color:var(--muted); line-height:1.5; margin:0 0 8px; padding-left:16px; }
+  .actions{ display:flex; gap:6px; }
+  .actions button{
+    font-family:var(--sans); font-size:11.5px; padding:4px 9px; border-radius:4px; cursor:pointer;
+    border:1px solid var(--line); background:var(--panel-2); color:var(--text);
+  }
+  .actions button:hover{ border-color:var(--muted); }
+  .actions .overridden{ font-size:11px; color:var(--muted); font-style:italic; }
+  .empty{ color:var(--muted); font-size:12.5px; padding:20px 8px; }
+
+  .audit{ grid-column: 1 / 3; padding:14px 20px; background:var(--panel-2); border-top:1px solid var(--line); }
+  .audit h2{ font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:0 0 8px; font-weight:600; }
+  .audit-row{ display:flex; gap:24px; align-items:flex-start; font-size:12.5px; flex-wrap:wrap; }
+  .audit-row .col{ min-width:220px; }
+  .audit-row .label{ color:var(--muted); margin-bottom:4px; }
+  .fields{ font-family:var(--mono); font-size:12px; }
+  .fields .over{ color:var(--block); }
+  .risk{ font-family:var(--mono); font-weight:600; }
+  .risk.high{ color:var(--block); } .risk.medium{ color:var(--warn); } .risk.none{ color:var(--safe); }
+
+  svg{ width:100%; height:100%; display:block; }
+  .node-label{ font-family:var(--mono); font-size:10px; fill:var(--muted); pointer-events:none; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="pulse"></span>
+    <h1>API Sentinel</h1>
+  </div>
+  <div class="stats" id="stats">loading…</div>
+</div>
+
+<div class="layout">
+  <div class="graph-panel">
+    <div class="caption">live access graph — identities → resources, sized &amp; colored by anomaly score</div>
+    <svg id="graph"></svg>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--identity)"></i>identity</span>
+      <span><i class="dot" style="background:var(--resource)"></i>resource</span>
+      <span><i class="dot" style="background:var(--safe)"></i>allowed</span>
+      <span><i class="dot" style="background:var(--warn)"></i>throttled</span>
+      <span><i class="dot" style="background:var(--block)"></i>blocked</span>
+    </div>
+  </div>
+
+  <div class="feed">
+    <div class="feed-head">
+      <h2>Alert feed</h2>
+      <p>Flagged by behavioral detection — review or override below.</p>
+    </div>
+    <div class="feed-list" id="alerts"><div class="empty">No alerts yet. Run the simulator to generate traffic.</div></div>
+  </div>
+
+  <div class="audit" id="audit"></div>
+</div>
+
+<script>
+const API = "http://localhost:8000";
+
+function actionColor(a){
+  if(a === "block") return "var(--block)";
+  if(a === "throttle") return "var(--warn)";
+  return "var(--safe)";
+}
+
+async function fetchJSON(path){
+  const r = await fetch(API + path);
+  return r.json();
+}
+
+async function refreshStats(){
+  const s = await fetchJSON("/api/dashboard/stats");
+  document.getElementById("stats").innerHTML = `
+    <span>requests <b>${s.total_requests}</b></span>
+    <span>blocked <b style="color:var(--block)">${s.blocked}</b></span>
+    <span>throttled <b style="color:var(--warn)">${s.throttled}</b></span>
+    <span>flagged identities <b style="color:var(--warn)">${s.flagged_identities}</b></span>
+  `;
+}
+
+async function overrideAlert(id, decision){
+  await fetch(`${API}/api/dashboard/alerts/${id}/override`, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({decision})
+  });
+  refreshAlerts();
+}
+
+async function refreshAlerts(){
+  const alerts = await fetchJSON("/api/dashboard/alerts?limit=30");
+  const el = document.getElementById("alerts");
+  if(!alerts.length){ el.innerHTML = '<div class="empty">No alerts yet. Run the simulator to generate traffic.</div>'; return; }
+  el.innerHTML = alerts.map(a => `
+    <div class="alert">
+      <div class="row1">
+        <span class="who">${a.user_id} → ${a.resource_type}:${a.resource_id}</span>
+        <span class="badge ${a.action}">${a.action}</span>
+      </div>
+      <div class="score-bar"><i style="width:${a.score}%; background:${actionColor(a.action)}"></i></div>
+      <ul class="reasons">${a.reasons.map(r => `<li>${r}</li>`).join("")}</ul>
+      <div class="actions">
+        ${a.override
+          ? `<span class="overridden">analyst override: ${a.override}</span>`
+          : `<button onclick="overrideAlert('${a.id}','allow')">allow anyway</button>
+             <button onclick="overrideAlert('${a.id}','block')">confirm block</button>`}
+      </div>
+    </div>
+  `).join("");
+}
+
+async function refreshAudit(){
+  const rows = await fetchJSON("/api/dashboard/exposure-audit");
+  document.getElementById("audit").innerHTML = rows.map(r => `
+    <h2>Excessive data exposure audit — ${r.endpoint}</h2>
+    <div class="audit-row">
+      <div class="col">
+        <div class="label">fields returned by API</div>
+        <div class="fields">${r.fields_returned.map(f => r.over_exposed_fields.includes(f) ? `<span class="over">${f}</span>` : f).join(", ")}</div>
+      </div>
+      <div class="col">
+        <div class="label">fields consumed by UI</div>
+        <div class="fields">${r.fields_consumed_by_ui.join(", ")}</div>
+      </div>
+      <div class="col">
+        <div class="label">risk</div>
+        <div class="risk ${r.risk}">${r.risk}</div>
+      </div>
+      <div class="col" style="flex:1; min-width:280px;">
+        <div class="label">recommendation</div>
+        <div>${r.recommendation}</div>
+      </div>
+    </div>
+  `).join("");
+}
+
+// --- force graph ---
+const svg = d3.select("#graph");
+let width, height, simulation;
+
+function sizeSvg(){
+  const panel = document.querySelector(".graph-panel");
+  width = panel.clientWidth; height = panel.clientHeight;
+  svg.attr("viewBox", [0,0,width,height]);
+}
+sizeSvg();
+window.addEventListener("resize", sizeSvg);
+
+async function refreshGraph(){
+  const { nodes, edges } = await fetchJSON("/api/dashboard/graph?limit=300");
+
+  const nodeById = new Map(nodes.map(n => [n.id, n]));
+  const links = edges.map(e => ({ source: e.source, target: e.target, score: e.score, action: e.action }));
+
+  svg.selectAll("*").remove();
+
+  if (!nodes.length) return;
+
+  simulation = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(90).strength(0.4))
+    .force("charge", d3.forceManyBody().strength(-160))
+    .force("center", d3.forceCenter(width/2, height/2))
+    .force("collide", d3.forceCollide(26));
+
+  const link = svg.append("g")
+    .selectAll("line")
+    .data(links)
+    .join("line")
+    .attr("stroke", d => actionColor(d.action))
+    .attr("stroke-opacity", 0.55)
+    .attr("stroke-width", d => 1 + d.score/40);
+
+  const node = svg.append("g")
+    .selectAll("circle")
+    .data(nodes)
+    .join("circle")
+    .attr("r", d => d.type === "identity" ? 9 + d.max_score/12 : 6 + d.max_score/16)
+    .attr("fill", d => d.type === "identity" ? "var(--identity)" : "var(--resource)")
+    .attr("stroke", d => d.max_score >= 70 ? "var(--block)" : d.max_score >= 40 ? "var(--warn)" : "none")
+    .attr("stroke-width", 2)
+    .call(drag(simulation));
+
+  const label = svg.append("g")
+    .selectAll("text")
+    .data(nodes)
+    .join("text")
+    .attr("class", "node-label")
+    .attr("dy", -12)
+    .text(d => d.label);
+
+  simulation.on("tick", () => {
+    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    node.attr("cx", d => d.x).attr("cy", d => d.y);
+    label.attr("x", d => d.x).attr("y", d => d.y);
+  });
+}
+
+function drag(sim){
+  function started(event, d){ if(!event.active) sim.alphaTarget(0.2).restart(); d.fx = d.x; d.fy = d.y; }
+  function dragged(event, d){ d.fx = event.x; d.fy = event.y; }
+  function ended(event, d){ if(!event.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }
+  return d3.drag().on("start", started).on("drag", dragged).on("end", ended);
+}
+
+async function tick(){
+  try {
+    await Promise.all([refreshStats(), refreshAlerts(), refreshGraph(), refreshAudit()]);
+  } catch(e){
+    document.getElementById("stats").innerHTML = `<span style="color:var(--block)">backend unreachable at ${API} — is uvicorn running?</span>`;
+  }
+}
+tick();
+setInterval(tick, 1500);
+</script>
+</body>
+</html>
